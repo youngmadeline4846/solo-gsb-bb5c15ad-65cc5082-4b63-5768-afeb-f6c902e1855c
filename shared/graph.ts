@@ -71,3 +71,60 @@ export interface PropagateResult {
 export interface GraphApiResponse {
   graph: GraphDocument;
 }
+
+/** 边权敏感性扫描中单个边权取值点的计算状态 */
+export type SensitivityPointStatus = 'converged' | 'oscillating' | 'limit';
+
+export interface SensitivityPoint {
+  /** 被扫描边在该点使用的权重，取值 0、0.05、…、1 */
+  weight: number;
+  /** 状态：收敛 / 振荡 / 达到上限未收敛 */
+  status: SensitivityPointStatus;
+  /** 实际迭代停止轮次 */
+  iterations: number;
+  /**
+   * 目标节点的最终可信度：
+   * 收敛点取收敛值；振荡点无稳定终值，恒为 null（无目标值时以 reason 展示原因）；
+   * 达到上限未收敛时取最后一轮值，仅作参考。
+   */
+  targetValue: number | null;
+  /** 检测到的振荡周期（仅振荡点可能非空） */
+  detectedPeriod: number | null;
+  /** 最后一轮的最大节点变化 */
+  maxChange: number;
+  /** 无目标值时的原因说明（供悬停展示） */
+  reason: string;
+}
+
+export interface SensitivityThresholdBand {
+  /** 首次跨越 0.5 的连续采样区间左端（权重） */
+  fromWeight: number;
+  /** 连续采样区间右端（权重） */
+  toWeight: number;
+  /** 区间左端的目标可信度 */
+  fromValue: number;
+  /** 区间右端的目标可信度 */
+  toValue: number;
+}
+
+export interface SensitivityResult {
+  edgeId: string;
+  targetNodeId: string;
+  samples: number;
+  points: SensitivityPoint[];
+  /** 首个由收敛点构成、目标值首次跨过 0.5 的连续采样区间；振荡/未收敛点不参与判断 */
+  thresholdBand: SensitivityThresholdBand | null;
+  /** 本次扫描实际使用的传播参数 */
+  options: Required<PropagateOptions>;
+  message: string;
+}
+
+export interface SensitivityRequest {
+  /** 画布当前图：仅在内存中用于本次扫描，不会被保存或持久化 */
+  graph: GraphDocument;
+  edgeId: string;
+  targetNodeId: string;
+  options?: PropagateOptions;
+  /** 等距采样点数量（含 0 和 1），默认 21 */
+  samples?: number;
+}

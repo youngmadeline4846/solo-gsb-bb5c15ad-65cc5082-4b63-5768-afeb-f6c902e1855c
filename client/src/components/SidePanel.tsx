@@ -1,11 +1,24 @@
 import type { Edge, Node } from 'reactflow';
 import type { ArgumentNodeData } from './ArgumentNode';
 import type { RoundDecomposition } from '../replay';
-import type { GraphDocument, NodeKind, PropagateOptions, PropagateResult, Stance } from '../../../shared/graph';
+import { SensitivityChart } from './SensitivityChart';
+import type {
+  GraphDocument,
+  NodeKind,
+  PropagateOptions,
+  PropagateResult,
+  SensitivityResult,
+  Stance
+} from '../../../shared/graph';
 
 export interface SelectionState {
   node?: Node<ArgumentNodeData>;
   edge?: Edge;
+}
+
+export interface SensitivitySelection {
+  edgeId: string;
+  targetNodeId: string;
 }
 
 interface SidePanelProps {
@@ -17,6 +30,19 @@ interface SidePanelProps {
   onUpdateNode: (id: string, patch: Partial<ArgumentNodeData>) => void;
   onUpdateEdge: (id: string, patch: { weight?: number; stance?: Stance }) => void;
   onDeleteSelection: () => void;
+  sensitivity: {
+    selection: SensitivitySelection;
+    onSelectionChange: (patch: Partial<SensitivitySelection>) => void;
+    scan: SensitivityResult | null;
+    scanning: boolean;
+    status: string;
+    onRun: () => void;
+    onClose: () => void;
+    edgeLabel: string;
+    targetLabel: string;
+  };
+  nodes: Node<ArgumentNodeData>[];
+  edges: Edge[];
 }
 
 const optionLabels: Array<{ key: keyof PropagateOptions; label: string; min: number; max: number; step: number }> = [
@@ -144,8 +170,14 @@ export function SidePanel({
   decomposition,
   onUpdateNode,
   onUpdateEdge,
-  onDeleteSelection
+  onDeleteSelection,
+  sensitivity,
+  nodes,
+  edges
 }: SidePanelProps) {
+  const stanceText = (stance: Stance) => (stance === 'support' ? '支持' : '反驳');
+  const nodeLabelById = new Map(nodes.map((node) => [node.id, node.data.label] as const));
+
   return (
     <aside className="side-panel">
       <section className="panel-card">
@@ -252,6 +284,14 @@ export function SidePanel({
         )}
       </section>
 
+      <SensitivityCard
+        sensitivity={sensitivity}
+        nodes={nodes}
+        edges={edges}
+        nodeLabelById={nodeLabelById}
+        stanceText={stanceText}
+      />
+
       {decomposition && selection.node && <DecompositionCard decomposition={decomposition} />}
 
       {result && (
@@ -287,8 +327,91 @@ export function SidePanel({
   );
 }
 
-export function graphToDocument(name: string, nodes: Node<ArgumentNodeData>[], edges: Edge[]): GraphDocument {
-  return {
+type SensitivityCardProps = Pick<SidePanelProps, 'sensitivity' | 'nodes' | 'edges'> & {
+  nodeLabelById: Map<string, string>;
+  stanceText: (stance: Stance) => string;
+};
+
+/** 边权敏感性扫描卡片：选择一条连线与一个目标节点后运行 0→1 的 21 点等距扫描。 */
+function SensitivityCard({ sensitivity, nodes, edges, nodeLabelById, stanceText }: SensitivityCardProps) {
+  const { selection: scanSelection, onSelectionChange, scan, scanning, status, onRun, onClose } = sensitivity;
+  const selectedEdge = edges.find((edge) => edge.id === scanSelection.edgeId);
+  const canRun = Boolean(selectedEdge) && nodes.some((node) => node.id === scanSelection.targetNodeId);
+
+  const edgeLabel = (edge: Edge) => {
+    const stance = (edge.data?.stance as Stance) ?? 'support';
+    const weight = Math.round(Number(edge.data?.weight ?? 0.6) * 100);
+    return `${nodeLabelById.get(edge.source) ?? edge.source} ${stanceText(stance)}→ ${
+      nodeLabelById.get(edge.target) ?? edge.target
+    }（${weight}%）`;
+  };
+
+  return (
+    <section className="panel-card sensitivity-card">
+      <div className="sensitivity-heading">
+        <h2>边权敏感性扫描</h2>
+        {scan && (
+          <button type="button" className="sensitivity-close" onClick={onClose} title="关闭扫描结果">
+            ✕
+          </button>
+        )}
+      </div>
+
+      {nodes.length === 0 || edges.length === 0 ? (
+        <p className="hint">先创建节点与至少一条连线，才能扫描边权对目标可信度的影响。</p>
+      ) : (
+        <>
+          <Field label="扫描连线（边权 0→1 等距 21 点）">
+            <select
+              value={scanSelection.edgeId}
+              onChange={(event) => onSelectionChange({ edgeId: event.target.value })}
+            >
+              {!selectedEdge && <option value="">请选择连线…</option>}
+              {edges.map((edge) => (
+                <option key={edge.id} value={edge.id}>
+                  {edgeLabel(edge)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="目标节点（曲线展示其最终可信度）">
+            <select
+              value={scanSelection.targetNodeId}
+              onChange={(event) => onSelectionChange({ targetNodeId: event.target.value })}
+            >
+              {!nodes.some((node) => node.id === scanSelection.targetNodeId) && (
+                <option value="">请选择目标节点…</option>
+              )}
+              {nodes.map((node) => (
+                <option key={node.id} value={node.id}>
+                  {node.data.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <button type="button" className="primary sensitivity-run" disabled={!canRun || scanning} onClick={onRun}>
+            {scanning ? '扫描中…' : '运行边权扫描'}
+          </button>
+          <p className="hint">扫描使用上方当前传播参数，只在服务端内存中计算，不会保存或改动当前图。</p>
+          {status && <p className="sensitivity-status">{status}</p>}
+        </>
+      )}
+
+      {scan && (
+        <>
+          <SensitivityChart
+            scan={scan}
+            edgeLabel={sensitivity.edgeLabel}
+            targetLabel={sensitivity.targetLabel}
+          />
+          <p className="hint">{scan.message}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+export function graphToDocument(name: string, nodes: Node<ArgumentNodeData>[], edges: Edge[]): GraphDocument {  return {
     version: 1,
     name,
     nodes: nodes.map((node) => ({

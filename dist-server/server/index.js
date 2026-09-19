@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { createGraphStore } from './db.js';
 import { propagateBeliefs, validateGraphDocument, validateOptions } from './propagation.js';
+import { scanEdgeWeightSensitivity, validateSamples, validateSensitivitySelection } from './sensitivity.js';
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(currentDir, '../..');
 const port = Number(process.env.PORT ?? 8080);
@@ -40,6 +41,24 @@ app.post('/api/propagate', (request, response) => {
     }
     catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : '传播参数无效。' });
+    }
+});
+// 边权敏感性扫描：使用请求体携带的当前画布图，在内存中逐点计算，绝不保存或修改持久化图。
+app.post('/api/sensitivity/edge-weight', (request, response) => {
+    try {
+        const candidate = request.body?.graph;
+        if (candidate === undefined || candidate === null) {
+            throw new Error('请求体必须携带当前图 graph（扫描不会保存该图）。');
+        }
+        const graph = validateGraphDocument(candidate);
+        validateSensitivitySelection(graph, request.body?.edgeId, request.body?.targetNodeId);
+        const options = validateOptions(request.body?.options);
+        const samples = validateSamples(request.body?.samples);
+        const scan = scanEdgeWeightSensitivity(graph, request.body.edgeId, request.body.targetNodeId, options, samples);
+        response.json({ scan });
+    }
+    catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : '敏感性扫描请求无效。' });
     }
 });
 if (existsSync(staticDirectory)) {

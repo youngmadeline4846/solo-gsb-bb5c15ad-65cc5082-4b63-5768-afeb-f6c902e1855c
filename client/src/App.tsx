@@ -14,7 +14,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import { api } from './api';
 import { ArgumentNode, nodeTypes, type ArgumentNodeData } from './components/ArgumentNode';
-import { SidePanel, graphToDocument } from './components/SidePanel';
+import { SidePanel, graphToDocument, type SensitivitySelection } from './components/SidePanel';
 import { ReplayBar } from './components/ReplayBar';
 import { buildRoundDecomposition } from './replay';
 import type {
@@ -23,6 +23,7 @@ import type {
   GraphEdge,
   PropagateOptions,
   PropagateResult,
+  SensitivityResult,
   Stance
 } from '../../shared/graph';
 import { stableSample, oscillatingSample } from './samples';
@@ -111,6 +112,13 @@ export default function App() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [status, setStatus] = useState('正在加载…');
   const [busy, setBusy] = useState(false);
+  const [sensitivitySelection, setSensitivitySelection] = useState<SensitivitySelection>({
+    edgeId: '',
+    targetNodeId: ''
+  });
+  const [sensitivityResult, setSensitivityResult] = useState<SensitivityResult | null>(null);
+  const [sensitivityScanning, setSensitivityScanning] = useState(false);
+  const [sensitivityStatus, setSensitivityStatus] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
 
@@ -148,11 +156,18 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 图的任何增删改动都会使上一次扫描结果失效（扫描图与当前画布不再一致）。
+  const invalidateSensitivity = useCallback(() => {
+    setSensitivityResult(null);
+    setSensitivityStatus('');
+  }, []);
+
   const clearAnalysis = useCallback(
     (nextNodes = nodes, nextEdges = edges) => {
       setResult(null);
       setReplayRound(0);
       setPlaying(false);
+      invalidateSensitivity();
       setNodes(
         nextNodes.map((node) => ({
           ...node,
@@ -161,7 +176,7 @@ export default function App() {
       );
       setEdges(nextEdges.map((edge) => decorateEdge({ ...edge, animated: false, style: undefined }, false)));
     },
-    [edges, nodes, setEdges, setNodes]
+    [edges, nodes, setEdges, setNodes, invalidateSensitivity]
   );
 
   const onConnect = useCallback(
@@ -334,6 +349,8 @@ export default function App() {
     setResult(null);
     setReplayRound(0);
     setPlaying(false);
+    invalidateSensitivity();
+    setSensitivitySelection({ edgeId: '', targetNodeId: '' });
     if (nextOptions) setOptions(nextOptions);
     if (immediateSave) {
       setStatus('正在导入…');
@@ -377,11 +394,76 @@ export default function App() {
     [edges, selectedEdgeId]
   );
 
+  // 被扫描的边或目标节点删除后，清掉失效选择；不自动重选，避免跑出用户意料之外的扫描。
+  useEffect(() => {
+    setSensitivitySelection((current) => {
+      const edgeExists = !current.edgeId || edges.some((edge) => edge.id === current.edgeId);
+      const nodeExists = !current.targetNodeId || nodes.some((node) => node.id === current.targetNodeId);
+      if (edgeExists && nodeExists) return current;
+      return {
+        edgeId: edgeExists ? current.edgeId : '',
+        targetNodeId: nodeExists ? current.targetNodeId : ''
+      };
+    });
+  }, [edges, nodes]);
+
+  // 选中一条连线后，默认把扫描目标填为该连线的目标节点，减少一次手动选择。
+  useEffect(() => {
+    if (!selectedEdge) return;
+    setSensitivitySelection((current) => ({
+      edgeId: selectedEdge.id,
+      targetNodeId: current.targetNodeId || selectedEdge.target
+    }));
+  }, [selectedEdge]);
+
+  const runSensitivityScan = useCallback(async () => {
+    if (!sensitivitySelection.edgeId || !sensitivitySelection.targetNodeId) return;
+    setSensitivityScanning(true);
+    setSensitivityStatus('正在服务端内存中逐点计算（不保存图）…');
+    try {
+      // 直接提交当前画布：扫描只在服务端内存中进行，不触发任何持久化。
+      const { scan } = await api.scanEdgeWeight({
+        graph: graphToDocument(documentName, nodes, edges),
+        edgeId: sensitivitySelection.edgeId,
+        targetNodeId: sensitivitySelection.targetNodeId,
+        options
+      });
+      setSensitivityResult(scan);
+      setSensitivityStatus(scan.message);
+    } catch (error) {
+      setSensitivityResult(null);
+      setSensitivityStatus(`扫描失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSensitivityScanning(false);
+    }
+  }, [documentName, edges, nodes, options, sensitivitySelection.edgeId, sensitivitySelection.targetNodeId]);
+
+  const sensitivityEdgeLabel = useMemo(() => {
+    const edge = edges.find((item) => item.id === sensitivitySelection.edgeId);
+    if (!edge) return '所选连线';
+    const labelById = new Map(nodes.map((node) => [node.id, node.data.label] as const));
+    return `${labelById.get(edge.source) ?? edge.source} → ${labelById.get(edge.target) ?? edge.target}`;
+  }, [edges, nodes, sensitivitySelection.edgeId]);
+
+  const sensitivityTargetLabel = useMemo(
+    () => nodes.find((node) => node.id === sensitivitySelection.targetNodeId)?.data.label ?? '目标节点',
+    [nodes, sensitivitySelection.targetNodeId]
+  );
+
   // 选中节点时，本地重算「当前轮 → 下一轮」的可核对分解。
   const decomposition = useMemo(() => {
     if (!result || !selectedNode) return null;
     return buildRoundDecomposition(selectedNode, nodes, edges, result, replayRound);
   }, [result, selectedNode, nodes, edges, replayRound]);
+
+  const handleOptionsChange = useCallback(
+    (nextOptions: PropagateOptions) => {
+      setOptions(nextOptions);
+      // 扫描沿用当前传播参数：参数一变，旧曲线对应的参数就过期了。
+      invalidateSensitivity();
+    },
+    [invalidateSensitivity]
+  );
 
   return (
     <div className="app-shell">
@@ -478,13 +560,27 @@ export default function App() {
 
         <SidePanel
           options={options}
-          onOptionsChange={setOptions}
+          onOptionsChange={handleOptionsChange}
           result={result}
           selection={{ node: selectedNode, edge: selectedEdge }}
           decomposition={decomposition}
           onUpdateNode={updateNode}
           onUpdateEdge={updateEdge}
           onDeleteSelection={deleteSelection}
+          nodes={nodes}
+          edges={edges}
+          sensitivity={{
+            selection: sensitivitySelection,
+            onSelectionChange: (patch) =>
+              setSensitivitySelection((current) => ({ ...current, ...patch })),
+            scan: sensitivityResult,
+            scanning: sensitivityScanning,
+            status: sensitivityStatus,
+            onRun: runSensitivityScan,
+            onClose: () => setSensitivityResult(null),
+            edgeLabel: sensitivityEdgeLabel,
+            targetLabel: sensitivityTargetLabel
+          }}
         />
       </main>
     </div>

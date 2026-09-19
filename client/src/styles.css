@@ -627,6 +627,161 @@ button.danger {
   background: #2563eb;
 }
 
+/* ---------- 边权敏感性扫描 ---------- */
+
+.sensitivity-card {
+  border-color: #c7d2fe;
+}
+
+.sensitivity-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sensitivity-heading h2 {
+  margin-bottom: 12px;
+}
+
+.sensitivity-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 999px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.sensitivity-run {
+  width: 100%;
+  margin: 2px 0 4px;
+}
+
+.sensitivity-status {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: #3730a3;
+  background: #eef2ff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sensitivity-chart {
+  position: relative;
+  margin-top: 12px;
+}
+
+.sensitivity-chart svg {
+  display: block;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.sensitivity-chart svg polygon,
+.sensitivity-chart svg rect[role='button'],
+.sensitivity-chart svg circle[role='button'] {
+  cursor: pointer;
+}
+
+.sensitivity-chart svg polygon:hover,
+.sensitivity-chart svg rect[role='button']:hover,
+.sensitivity-chart svg circle[role='button']:hover {
+  filter: brightness(1.08);
+}
+
+.sensitivity-tooltip {
+  position: absolute;
+  z-index: 8;
+  width: 162px;
+  padding: 8px 10px;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 10px 26px rgb(30 41 59 / 18%);
+  pointer-events: none;
+}
+
+.tooltip-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.tooltip-row span {
+  color: #64748b;
+}
+
+.tooltip-reason {
+  color: #b91c1c;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.tooltip-reason-text {
+  margin: 4px 0 0;
+  color: #991b1b;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.sensitivity-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #475569;
+  font-size: 11.5px;
+}
+
+.sensitivity-legend li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-marker {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+}
+
+.legend-converged {
+  border-radius: 999px;
+  background: #2563eb;
+}
+
+.legend-oscillating {
+  transform: rotate(45deg);
+  border: 2px solid #dc2626;
+  background: #fff;
+}
+
+.legend-limit {
+  border: 2px solid #d97706;
+  background: #fff;
+}
+
+.sensitivity-band-note {
+  margin: 6px 0 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  color: #1e3a8a;
+  background: #eef2ff;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
 @media (max-width: 980px) {
   .topbar {
     align-items: flex-start;
