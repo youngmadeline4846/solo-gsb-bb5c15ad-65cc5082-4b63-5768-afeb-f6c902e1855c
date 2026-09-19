@@ -18,6 +18,7 @@ import { SidePanel, graphToDocument } from './components/SidePanel';
 import { ReplayBar } from './components/ReplayBar';
 import { buildRoundDecomposition } from './replay';
 import type {
+  EdgeWeightSensitivity,
   GraphDocument,
   GraphNode,
   GraphEdge,
@@ -111,6 +112,10 @@ export default function App() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [status, setStatus] = useState('正在加载…');
   const [busy, setBusy] = useState(false);
+  const [sensitivity, setSensitivity] = useState<EdgeWeightSensitivity | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [sensitivityTargetNodeId, setSensitivityTargetNodeId] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
 
@@ -153,6 +158,9 @@ export default function App() {
       setResult(null);
       setReplayRound(0);
       setPlaying(false);
+      // 任何图编辑都会使旧的边权扫描结果失效（扫描点基于旧图）。
+      setSensitivity(null);
+      setScanError(null);
       setNodes(
         nextNodes.map((node) => ({
           ...node,
@@ -377,6 +385,34 @@ export default function App() {
     [edges, selectedEdgeId]
   );
 
+  // 扫描目标：显式选择生效；未选或已失效时退回连线指向的节点。
+  const effectiveSensitivityTarget = useMemo(() => {
+    if (!selectedEdge) return '';
+    const stillExists = nodes.some((node) => node.id === sensitivityTargetNodeId);
+    return stillExists ? sensitivityTargetNodeId : selectedEdge.target;
+  }, [nodes, selectedEdge, sensitivityTargetNodeId]);
+
+  const runSensitivity = useCallback(async () => {
+    if (!selectedEdge || !effectiveSensitivityTarget) return;
+    setScanning(true);
+    setScanError(null);
+    try {
+      // 把当前画布（含尚未保存的编辑）发给服务端：只在其内存副本上扫描，不保存。
+      const { sensitivity: nextSensitivity } = await api.scanSensitivity({
+        edgeId: selectedEdge.id,
+        targetNodeId: effectiveSensitivityTarget,
+        options,
+        graph: graphToDocument(documentName, nodes, edges)
+      });
+      setSensitivity(nextSensitivity);
+    } catch (error) {
+      setSensitivity(null);
+      setScanError(`扫描失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setScanning(false);
+    }
+  }, [documentName, effectiveSensitivityTarget, edges, nodes, options, selectedEdge]);
+
   // 选中节点时，本地重算「当前轮 → 下一轮」的可核对分解。
   const decomposition = useMemo(() => {
     if (!result || !selectedNode) return null;
@@ -440,6 +476,8 @@ export default function App() {
             onEdgeClick={(_event, edge) => {
               setSelectedEdgeId(edge.id);
               setSelectedNodeId(null);
+              // 切换选中连线时，默认把连线本身指向的节点作为扫描目标。
+              setSensitivityTargetNodeId(edge.target);
             }}
             onPaneClick={() => {
               setSelectedNodeId(null);
@@ -485,6 +523,13 @@ export default function App() {
           onUpdateNode={updateNode}
           onUpdateEdge={updateEdge}
           onDeleteSelection={deleteSelection}
+          nodes={nodes}
+          sensitivity={sensitivity}
+          sensitivityTargetNodeId={effectiveSensitivityTarget}
+          scanning={scanning}
+          scanError={scanError}
+          onSensitivityTargetChange={setSensitivityTargetNodeId}
+          onRunSensitivity={runSensitivity}
         />
       </main>
     </div>

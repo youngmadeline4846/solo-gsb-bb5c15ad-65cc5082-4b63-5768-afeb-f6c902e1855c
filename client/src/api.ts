@@ -1,4 +1,9 @@
-import type { GraphDocument, PropagateOptions, PropagateResult } from '../../shared/graph';
+import type {
+  EdgeWeightSensitivity,
+  GraphDocument,
+  PropagateOptions,
+  PropagateResult
+} from '../../shared/graph';
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -20,5 +25,16 @@ export const api = {
     request<{ result: PropagateResult }>('/api/propagate', {
       method: 'POST',
       body: JSON.stringify({ options })
+    }),
+  scanSensitivity: (params: {
+    edgeId: string;
+    targetNodeId: string;
+    options: PropagateOptions;
+    /** 携带当前画布图：服务端在内存副本上扫描，不保存图 */
+    graph: GraphDocument;
+  }) =>
+    request<{ sensitivity: EdgeWeightSensitivity }>('/api/sensitivity', {
+      method: 'POST',
+      body: JSON.stringify(params)
     })
 };

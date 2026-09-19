@@ -4,7 +4,12 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { createGraphStore } from './db.js';
-import { propagateBeliefs, validateGraphDocument, validateOptions } from './propagation.js';
+import {
+  propagateBeliefs,
+  scanEdgeWeightSensitivity,
+  validateGraphDocument,
+  validateOptions
+} from './propagation.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(currentDir, '../..');
@@ -45,6 +50,31 @@ app.post('/api/propagate', (request, response) => {
     response.json({ result });
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : '传播参数无效。' });
+  }
+});
+
+app.post('/api/sensitivity', (request, response) => {
+  try {
+    const body = request.body ?? {};
+    if (typeof body.edgeId !== 'string' || !body.edgeId.trim()) {
+      throw new Error('缺少要扫描的连线 edgeId。');
+    }
+    if (typeof body.targetNodeId !== 'string' || !body.targetNodeId.trim()) {
+      throw new Error('缺少目标节点 targetNodeId。');
+    }
+    // 请求可携带当前画布图：扫描只在内存副本上进行，绝不写入 SQLite。
+    // 未携带时退回当前持久化图。
+    const graph = body.graph ? validateGraphDocument(body.graph) : store.getGraph();
+    const options = validateOptions(body.options);
+    const sensitivity = scanEdgeWeightSensitivity(
+      graph,
+      body.edgeId.trim(),
+      body.targetNodeId.trim(),
+      options
+    );
+    response.json({ sensitivity });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : '边权扫描请求无效。' });
   }
 });
 

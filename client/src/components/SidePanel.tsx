@@ -1,7 +1,8 @@
 import type { Edge, Node } from 'reactflow';
 import type { ArgumentNodeData } from './ArgumentNode';
 import type { RoundDecomposition } from '../replay';
-import type { GraphDocument, NodeKind, PropagateOptions, PropagateResult, Stance } from '../../../shared/graph';
+import { SensitivityPanel } from './SensitivityPanel';
+import type { EdgeWeightSensitivity, GraphDocument, NodeKind, PropagateOptions, PropagateResult, Stance } from '../../../shared/graph';
 
 export interface SelectionState {
   node?: Node<ArgumentNodeData>;
@@ -17,6 +18,13 @@ interface SidePanelProps {
   onUpdateNode: (id: string, patch: Partial<ArgumentNodeData>) => void;
   onUpdateEdge: (id: string, patch: { weight?: number; stance?: Stance }) => void;
   onDeleteSelection: () => void;
+  nodes: Node<ArgumentNodeData>[];
+  sensitivity: EdgeWeightSensitivity | null;
+  sensitivityTargetNodeId: string;
+  scanning: boolean;
+  scanError: string | null;
+  onSensitivityTargetChange: (nodeId: string) => void;
+  onRunSensitivity: () => void;
 }
 
 const optionLabels: Array<{ key: keyof PropagateOptions; label: string; min: number; max: number; step: number }> = [
@@ -144,7 +152,14 @@ export function SidePanel({
   decomposition,
   onUpdateNode,
   onUpdateEdge,
-  onDeleteSelection
+  onDeleteSelection,
+  nodes,
+  sensitivity,
+  sensitivityTargetNodeId,
+  scanning,
+  scanError,
+  onSensitivityTargetChange,
+  onRunSensitivity
 }: SidePanelProps) {
   return (
     <aside className="side-panel">
@@ -251,6 +266,19 @@ export function SidePanel({
           <p className="hint">点击节点或连线进行编辑；从节点右侧圆点拖出即可连线。</p>
         )}
       </section>
+
+      {!selection.node && selection.edge && (
+        <SensitivityPanel
+          edge={selection.edge}
+          nodes={nodes}
+          targetNodeId={sensitivityTargetNodeId}
+          onTargetNodeChange={onSensitivityTargetChange}
+          onRun={onRunSensitivity}
+          scanning={scanning}
+          sensitivity={sensitivity}
+          error={scanError}
+        />
+      )}
 
       {decomposition && selection.node && <DecompositionCard decomposition={decomposition} />}
 

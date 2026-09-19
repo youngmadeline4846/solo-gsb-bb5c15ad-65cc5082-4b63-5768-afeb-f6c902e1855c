@@ -1,4 +1,5 @@
 import type {
+  EdgeWeightSensitivity,
   GraphDocument,
   GraphEdge,
   GraphNode,
@@ -6,6 +7,9 @@ import type {
   PropagateOptions,
   PropagateResult,
   PropagationCycle,
+  SensitivityPoint,
+  SensitivityStatus,
+  SensitivityThresholdBand,
   Stance
 } from '../shared/graph.js';
 
@@ -385,5 +389,101 @@ export function propagateBeliefs(graph: GraphDocument, suppliedOptions?: Propaga
     cycles,
     options,
     message
+  };
+}
+
+/** 边权扫描固定采样数：0..1 等距 21 个值。 */
+export const SENSITIVITY_SAMPLE_COUNT = 21;
+
+/**
+ * 在不修改、不持久化图的前提下，把指定边权从 0 到 1 等距取 21 个值，
+ * 分别沿用给定传播参数运行传播，汇总目标节点的最终可信度。
+ * 仅收敛点拥有目标值并参与 0.5 阈值跨越判断；振荡 / 达到上限的点给出原因。
+ */
+export function scanEdgeWeightSensitivity(
+  graph: GraphDocument,
+  edgeId: string,
+  targetNodeId: string,
+  suppliedOptions?: PropagateOptions
+): EdgeWeightSensitivity {
+  const edge = graph.edges.find((item) => item.id === edgeId);
+  if (!edge) throw new Error('指定的连线不存在。');
+  const targetNode = graph.nodes.find((node) => node.id === targetNodeId);
+  if (!targetNode) throw new Error('指定的目标节点不存在。');
+  const options = validateOptions(suppliedOptions);
+
+  const points: SensitivityPoint[] = [];
+  for (let index = 0; index < SENSITIVITY_SAMPLE_COUNT; index += 1) {
+    const weight = index / (SENSITIVITY_SAMPLE_COUNT - 1);
+    const scannedGraph: GraphDocument = {
+      ...graph,
+      edges: graph.edges.map((item) => (item.id === edgeId ? { ...item, weight } : item))
+    };
+    const run = propagateBeliefs(scannedGraph, options);
+    const lastTarget = run.traces[targetNodeId]?.[run.iterations] ?? NaN;
+
+    let status: SensitivityStatus;
+    let targetValue: number | null;
+    let reason: string | null;
+    if (run.converged) {
+      status = 'converged';
+      targetValue = lastTarget;
+      reason = null;
+    } else if (run.detectedPeriod !== null) {
+      status = 'oscillating';
+      targetValue = null;
+      reason = `检测到周期约为 ${run.detectedPeriod} 的持续振荡，目标节点在区间 ${lastTarget.toFixed(3)} 附近往复，无稳定最终值。`;
+    } else {
+      status = 'limit';
+      targetValue = null;
+      reason = `达到 ${options.maxIterations} 轮上限仍未收敛（停止时目标节点约 ${lastTarget.toFixed(3)}，最大变化 ${run.maxChange.toFixed(4)}）。`;
+    }
+
+    points.push({
+      weight,
+      status,
+      iterations: run.iterations,
+      targetValue,
+      reason,
+      detectedPeriod: run.detectedPeriod
+    });
+  }
+
+  // 仅在“连续的收敛采样点”之间寻找首次跨过 0.5 的区间；
+  // 振荡或达到上限的点不参与跨越判断，也会切断连续性。
+  let thresholdBand: SensitivityThresholdBand | null = null;
+  for (let i = 1; i < points.length && thresholdBand === null; i += 1) {
+    const previous = points[i - 1];
+    const current = points[i];
+    if (previous.status !== 'converged' || current.status !== 'converged') continue;
+    const fromValue = previous.targetValue as number;
+    const toValue = current.targetValue as number;
+    if (fromValue < 0.5 && toValue >= 0.5) {
+      thresholdBand = {
+        fromWeight: previous.weight,
+        toWeight: current.weight,
+        fromValue,
+        toValue,
+        direction: 'upward'
+      };
+    } else if (fromValue > 0.5 && toValue <= 0.5) {
+      thresholdBand = {
+        fromWeight: previous.weight,
+        toWeight: current.weight,
+        fromValue,
+        toValue,
+        direction: 'downward'
+      };
+    }
+  }
+
+  return {
+    edgeId,
+    targetNodeId,
+    edge: { ...edge },
+    targetNodeLabel: targetNode.label,
+    options,
+    points,
+    thresholdBand
   };
 }
